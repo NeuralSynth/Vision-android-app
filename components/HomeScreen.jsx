@@ -1,146 +1,163 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  Image,
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   Alert,
-  ImageBackground,
-  Linking
+  Linking,
+  Platform,
 } from 'react-native';
+import { Camera, useCameraDevices } from 'react-native-vision-camera';
+import ViewShot from 'react-native-view-shot';
 import Tts from 'react-native-tts';
-import call from 'react-native-phone-call';
+import axios from 'axios';
 
 export default function HomeScreen() {
-  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
+  const devices = useCameraDevices();
+  const backCam = devices.back;
+  const cameraRef = useRef(null);
+  const viewShotRef = useRef(null);
 
-  const toggleSpeaker = () => {
-    setIsSpeakerOn(!isSpeakerOn);
-    if (!isSpeakerOn) {
-      Tts.speak('Speaker is turned on');
-    } else {
-      Tts.stop();
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [intervalId, setIntervalId] = useState(null);
+
+  // Request permission on mount
+  useEffect(() => {
+    checkAndRequestCameraPermission();
+  }, []);
+
+  const checkAndRequestCameraPermission = async () => {
+    const currentStatus = await Camera.getCameraPermissionStatus();
+
+    if (currentStatus === 'authorized') {
+      return;
+    }
+
+    if (currentStatus === 'not-determined' || currentStatus === 'denied') {
+      const newStatus = await Camera.requestCameraPermission();
+
+      if (newStatus !== 'authorized') {
+        Alert.alert(
+          'Camera Required',
+          'This app needs camera access to detect objects.',
+          [
+            {
+              text: 'Try Again',
+              onPress: () => checkAndRequestCameraPermission(),
+              style: 'default',
+            },
+          ],
+          { cancelable: false }
+        );
+      }
+    } else if (currentStatus === 'blocked') {
+      Alert.alert(
+        'Permission Blocked',
+        'Camera permission is blocked. Please enable it from settings.',
+        [
+          {
+            text: 'Open Settings',
+            onPress: () => Linking.openSettings(),
+          },
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+        ],
+        { cancelable: true }
+      );
     }
   };
 
-  const handleEmergencyCall = () => {
-    Linking.openURL('tel:9089783209');
+  useEffect(() => {
+    if (isDetecting) {
+      const id = setInterval(captureAndDetect, 5000); // every 5s
+      setIntervalId(id);
+    } else {
+      clearInterval(intervalId);
+    }
+    return () => clearInterval(intervalId);
+  }, [isDetecting]);
+
+  const captureAndDetect = async () => {
+    if (!viewShotRef.current) return;
+
+    try {
+      const base64 = await viewShotRef.current.capture({
+        format: 'jpg',
+        quality: 0.5,
+        result: 'base64',
+      });
+
+      const resp = await axios.post('http://192.168.1.44:5000/detect', {
+        image: base64,
+      });
+
+      const detected = resp.data.objects;
+      if (detected.length) {
+        Tts.speak(`I see: ${detected.join(', ')}`);
+      } else {
+        Tts.speak('No objects detected');
+      }
+    } catch (e) {
+      console.warn('detect error', e);
+    }
   };
 
+  const toggleLiveDetect = () => {
+    setIsDetecting((on) => {
+      if (on) Tts.speak('Stopping live detection');
+      else Tts.speak('Starting live detection');
+      return !on;
+    });
+  };
+
+  const handleEmergency = () => Linking.openURL('tel:9089783209');
+
+  if (!backCam) return <Text>Loading camera…</Text>;
+
   return (
-    <ImageBackground
-      source={require('../images/IMAGE.png')}
-      style={styles.background}
-      resizeMode="cover"
-    >
-      <View style={styles.container}>
-        {/* Top Buttons */}
-        <View style={styles.row}>
-          <TouchableOpacity
-            style={[styles.button, styles.button1]}
-            onPress={() => {
-                Tts.speak('Giving more Description'),
-                Alert.alert('More Description')}
-            }
-          >
-            <Image
-              source={require('../images/info.png')}
-              style={{ width: 30, height: 30, marginBottom: 5 }}
-            />
-            <Text style={styles.text}>More Description</Text>
-          </TouchableOpacity>
+    <View style={styles.full}>
+      <ViewShot style={styles.full} ref={viewShotRef} options={{ result: 'base64' }}>
+        <Camera
+          style={styles.full}
+          device={backCam}
+          isActive={true}
+          ref={cameraRef}
+        />
+      </ViewShot>
 
-          <TouchableOpacity
-            style={[styles.button, styles.button2]}
-            onPress={toggleSpeaker}
-          >
-            <Image
-              source={
-                isSpeakerOn
-                  ? require('../images/volume-on.png')
-                  : require('../images/volume-off.png')
-              }
-              style={{ width: 30, height: 30, marginBottom: 5 }}
-            />
-            <Text style={styles.text}>
-              {isSpeakerOn ? 'Speaker Off' : 'Speaker On'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.overlay}>
+        <TouchableOpacity style={styles.button} onPress={toggleLiveDetect}>
+          <Text style={styles.btnText}>
+            {isDetecting ? 'Stop Live Detect' : 'Start Live Detect'}
+          </Text>
+        </TouchableOpacity>
 
-        {/* Bottom Buttons */}
-        <View style={styles.row}>
-          <TouchableOpacity
-            style={[styles.button, styles.button3]}
-            onPress={() =>{
-                Tts.speak('Reading the text'),
-                Alert.alert('Read Full Text')}}
-          >
-            <Image
-              source={require('../images/book.png')}
-              style={{ width: 30, height: 30, marginBottom: 5 }}
-            />
-            <Text style={styles.text}>Read Text</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.button, styles.button4]}
-            onPress={handleEmergencyCall}
-          >
-            <Image
-              source={require('../images/call.png')}
-              style={{ width: 30, height: 30, marginBottom: 5 }}
-            />
-            <Text style={styles.text}>Emergency</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity style={styles.button} onPress={handleEmergency}>
+          <Text style={styles.btnText}>Emergency Call</Text>
+        </TouchableOpacity>
       </View>
-    </ImageBackground>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  background: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  container: {
-    flex: 1,
-    backgroundColor: 'rgba(10, 61, 98, 0.7)',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  row: {
+  full: { flex: 1 },
+  overlay: {
+    position: 'absolute',
+    bottom: 40,
+    left: 20,
+    right: 20,
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginVertical: 20,
+    justifyContent: 'space-around',
   },
   button: {
-    flex: 0.45,
-    paddingVertical: 100,
-    paddingHorizontal: 30,
-    borderRadius: 20,
-    alignItems: 'center',
-    elevation: 5,
+    backgroundColor: '#26de81',
+    padding: 12,
+    borderRadius: 8,
+    elevation: 3,
   },
-  button1: {
-    backgroundColor: '#1E3799',
-  },
-  button2: {
-    backgroundColor: '#60A3BC',
-  },
-  button3: {
-    backgroundColor: '#3B3B98',
-  },
-  button4: {
-    backgroundColor: '#FC427B',
-  },
-  text: {
-    color: '#fff',
-    fontSize: 16,
-    textAlign: 'center',
-    marginTop: 10,
-  },
+  btnText: { color: '#fff', fontSize: 16 },
 });
