@@ -72,7 +72,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (isDetecting) {
-      const id = setInterval(captureAndDetect, 5000); // every 5s
+      const id = setInterval(captureAndDetect, 5000); 
       setIntervalId(id);
     } else {
       clearInterval(intervalId);
